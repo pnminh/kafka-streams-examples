@@ -199,7 +199,10 @@ public class WordCountLambdaExample {
       // This step re-keys (re-partitions) the input data, with the new record key being the words.
       // Note: No need to specify explicit serdes because the resulting key and value types
       // (String and String) match the application's default serdes.
-      .groupBy((keyIgnored, word) -> word)
+      .groupBy((keyIgnored, word) -> {
+        System.out.println("keyIgnored: " +  keyIgnored);
+        return keyIgnored+word;
+      })
       // Count the occurrences of each word (record key).
       .count();
 
