@@ -178,6 +178,8 @@ public class GlobalKTablesExample {
     // Join the orders stream to the customer global table. As this is global table
     // we can use a non-key based join with out needing to repartition the input stream
     final KStream<Long, CustomerOrder> customerOrdersStream = ordersStream.join(customers,
+                                                                //orderId is key and order is value of the left of the join,
+                                                                //order.getCustomerId() is the field to map with the key from the right of the join
                                                                 (orderId, order) -> order.getCustomerId(),
                                                                 (order, customer) -> new CustomerOrder(customer,
                                                                                                        order));
