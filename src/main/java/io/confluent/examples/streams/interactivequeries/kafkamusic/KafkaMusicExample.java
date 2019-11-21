@@ -283,7 +283,7 @@ public class KafkaMusicExample {
 
   static Topology buildTopology(final Map<String, String> serdeConfig) {
     // create and configure the SpecificAvroSerdes required in this example
-
+    //how to serialize and deserialize
     final SpecificAvroSerde<PlayEvent> playEventSerde = new SpecificAvroSerde<>();
     playEventSerde.configure(serdeConfig, false);
 
@@ -303,7 +303,8 @@ public class KafkaMusicExample {
         PLAY_EVENTS,
         Consumed.with(Serdes.String(), playEventSerde));
 
-    // get table and create a state store to hold all the songs in the store
+    // get table and create a state store to hold all the songs in the store'
+    //key: songId, value: song
     final KTable<Long, Song>
         songTable =
         builder.table(SONG_FEED, Materialized.<Long, Song, KeyValueStore<Bytes, byte[]>>as(ALL_SONGS)
@@ -311,6 +312,7 @@ public class KafkaMusicExample {
             .withValueSerde(valueSongSerde));
 
     // Accept play events that have a duration >= the minimum
+    //key: songId, value: PlayEvent
     final KStream<Long, PlayEvent> playsBySongId =
         playEvents.filter((region, event) -> event.getDuration() >= MIN_CHARTABLE_DURATION)
             // repartition based on song id
@@ -318,17 +320,20 @@ public class KafkaMusicExample {
 
 
     // join the plays with song as we will use it later for charting
+    //key: songId, value:song, based on the playEvents
     final KStream<Long, Song> songPlays = playsBySongId.leftJoin(songTable,
         (value1, song) -> song,
         Joined.with(Serdes.Long(), playEventSerde, valueSongSerde));
 
     // create a state store to track song play counts
+    //group by song ,e.g. key:song1,value:song1, key:song2,value:song2
     final KTable<Song, Long> songPlayCounts = songPlays.groupBy((songId, song) -> song,
                                                                 Grouped.with(keySongSerde, valueSongSerde))
+            //count number of plays per song(using groupBy to segregate songs)
             .count(Materialized.<Song, Long, KeyValueStore<Bytes, byte[]>>as(SONG_PLAY_COUNT_STORE)
                            .withKeySerde(valueSongSerde)
                            .withValueSerde(Serdes.Long()));
-
+    //how to serialize and deserialize top 5 songs
     final TopFiveSerde topFiveSerde = new TopFiveSerde();
 
 
@@ -336,12 +341,16 @@ public class KafkaMusicExample {
     // store "top-five-songs-by-genre", and this state store can then be queried interactively via a REST API (cf.
     // MusicPlaysRestService) for the latest charts per genre.
     songPlayCounts.groupBy((song, plays) ->
+            //repartition key from song to genre
             KeyValue.pair(song.getGenre().toLowerCase(),
                 new SongPlayCount(song.getId(), plays)),
         Grouped.with(Serdes.String(), songPlayCountSerde))
         // aggregate into a TopFiveSongs instance that will keep track
         // of the current top five for each genre. The data will be available in the
         // top-five-songs-genre store
+            // first: remove the item:  {"song_id": 8, "plays": 60}
+            // second: add back the item with new count  {"song_id": 8, "plays": 61}
+            //key is the genre, value is top 5 songs for that key
         .aggregate(TopFiveSongs::new,
             (aggKey, value, aggregate) -> {
               aggregate.add(value);
@@ -359,16 +368,19 @@ public class KafkaMusicExample {
     // Compute the top five chart. The results of this computation will continuously update the state
     // store "top-five-songs", and this state store can then be queried interactively via a REST API (cf.
     // MusicPlaysRestService) for the latest charts per genre.
+    //only a single key: all, value: top 5 songs
     songPlayCounts.groupBy((song, plays) ->
             KeyValue.pair(TOP_FIVE_KEY,
                 new SongPlayCount(song.getId(), plays)),
         Grouped.with(Serdes.String(), songPlayCountSerde))
         .aggregate(TopFiveSongs::new,
             (aggKey, value, aggregate) -> {
+              System.out.println("Add key and value" + aggKey+" "+value);
               aggregate.add(value);
               return aggregate;
             },
             (aggKey, value, aggregate) -> {
+              System.out.println("Remove key and value" + aggKey+" "+value);
               aggregate.remove(value);
               return aggregate;
             },
@@ -469,7 +481,9 @@ public class KafkaMusicExample {
    * Used in aggregations to keep track of the Top five songs
    */
   static class TopFiveSongs implements Iterable<SongPlayCount> {
+
     private final Map<Long, SongPlayCount> currentSongs = new HashMap<>();
+    //create a treeset of song ranking by numbers of plays from high to low
     private final TreeSet<SongPlayCount> topFive = new TreeSet<>((o1, o2) -> {
       final int result = o2.getPlays().compareTo(o1.getPlays());
       if (result != 0) {
@@ -482,8 +496,10 @@ public class KafkaMusicExample {
     public String toString() {
       return currentSongs.toString();
     }
-
+    //add new item, if the list grows to more than 5 (aka 6 items), the item with lowest plays will get deleted
     public void add(final SongPlayCount songPlayCount) {
+      //remove the existing record then add it back with a new play number
+      //map can be used for quick find?
       if(currentSongs.containsKey(songPlayCount.getSongId())) {
         topFive.remove(currentSongs.remove(songPlayCount.getSongId()));
       }
@@ -495,7 +511,6 @@ public class KafkaMusicExample {
         topFive.remove(last);
       }
     }
-
     void remove(final SongPlayCount value) {
       topFive.remove(value);
       currentSongs.remove(value.getSongId());
